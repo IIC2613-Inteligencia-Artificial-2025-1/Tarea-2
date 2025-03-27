@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+
+<head>
+  <script src="https://kit.fontawesome.com/dbc6cb6204.js" crossorigin="anonymous"></script>
+  <title>Warehouse Robot and Shelf Visualization</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+    }
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 20px;
+    }
+    .controls {
+      margin: 20px 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+    }
+    button {
+      padding: 8px 12px;
+      cursor: pointer;
+      background-color: #4CAF50;
+      color: white;
+      border: none;
+      border-radius: 4px;
+    }
+    button:hover {
+      background-color: #45a049;
+    }
+    .info {
+      margin-top: 20px;
+      display: flex;
+      justify-content: space-between;
+    }
+    .legend {
+      border: 1px solid #ddd;
+      padding: 10px;
+      border-radius: 5px;
+      margin-top: 20px;
+    }
+    .legend-item {
+      display: flex;
+      align-items: center;
+      margin-bottom: 5px;
+    }
+    .legend-color {
+      width: 20px;
+      height: 20px;
+      margin-right: 10px;
+    }
+  </style>
+</head>
+<html>
+<body>
+
+<div class="container" align="center">
+  <h1>Warehouse Robot and Shelf Visualization</h1>
+  
+  <canvas id="myCanvas" align="center" style="border:2px solid #d3d3d3;"></canvas>
+  
+  <div class="controls">
+    <button onmousedown="reset()">|&lt;&lt;</button>
+    <button onmousedown="drawcanvas(-1)">&lt;</button>
+    <button onmousedown="drawcanvas(1)">&gt;</button>
+    <span>Time: <span id="timeText">0</span></span>
+  </div>
+  
+  
+  <div style="margin-top: 20px;">
+    <input type="file" name="inputfile" id="inputfile">
+  </div>
+</div>
+
+<script type="text/javascript">
+  // Canvas and visualization settings
+  let xrange = 0;
+  let yrange = 0;
+  let robotPos = [];
+  let shelfPos = [];
+  let objectivePos = [];
+  let obstaclePos = [];
+  let tablePos = [];
+  let carryingRelations = [];
+  const cellsize = 80;
+  const robotsize = (4/5)*cellsize;
+  const shelfsize = (4/5)*cellsize;
+  const goalheight = (3/20)*cellsize;
+  const obstaclesize = (8/10)*cellsize; // Configurable obstacle size
+  const tablesize = (8/10)*cellsize; // Configurable table size
+  
+  // Paths for sprite images
+  const robotPath = './imgs/robot.png';
+  const shelfPath = './imgs/shelf.png';
+  const robotShelfPath = './imgs/robot_shelf.png';
+  const robotCarryingShelfPath = './imgs/robot_carry_shelf.png';
+  const robotCarryingShelfAtGoalPath = './imgs/robot_carry_shelf_goal.png';
+  const robotShelfAndGoalPath = './imgs/robot_shelf_goal.png'
+  const robotTablePath = './imgs/robot_table.png'
+  const goalAndShelfPath = './imgs/goal_shelf.png'
+  const goalPath = './imgs/goal.png';
+  const robotAtGoalPath = './imgs/robot_goal.png';
+  const obstaclePath = './imgs/obstacle.png';
+  const tablePath = './imgs/table.png'
+
+  var time = 0;
+  
+  // Initialize canvas
+  window.onload = function() {
+    drawcanvas(0);
+  }
+  
+  // File input handler
+  document.getElementById('inputfile').addEventListener('change', function() {
+    var fr = new FileReader();
+    fr.onload = function() {
+      let lines = fr.result.split("\n");
+      
+      // Parse range in X and Y
+      xrange = +lines[0].split(',')[0];
+      yrange = +lines[0].split(',')[1];
+      
+      // Set canvas size
+      document.getElementById("myCanvas").width = cellsize*(xrange+1);
+      document.getElementById("myCanvas").height = cellsize*(yrange+1);
+      
+      // Maximum time
+      let t_max = +lines[1];
+      
+      // Initialize position arrays
+      robotPos = [];
+      shelfPos = [];
+      objectivePos = [];
+      obstaclePos = [];
+      carryingRelations = [];
+      tablePos = [];
+      
+      for (let i=0; i<=t_max; i++) {
+        robotPos.push([]);
+        shelfPos.push([]);
+        carryingRelations.push({});
+      }
+      
+      // Parse position data
+      for (let i=2; i<lines.length; i++) {
+        let data = lines[i].split(",");
+        if (data.length <= 1) continue;  // Skip empty lines
+        
+        let type = data[0];
+        
+        let x, y, t, id, r, e;
+        switch (type) {
+          case 'R':  // Robot
+            id = +data[1];
+            x = +data[2];
+            y = +data[3];
+            t = +data[4];
+            
+            robotPos[t][id] = [id, x, y];
+            break;
+            
+          case 'S':  // Shelf
+            id = +data[1];
+            x = +data[2];
+            y = +data[3];
+            t = +data[4];
+            
+            // Store shelf position data
+            shelfPos[t][id] = [id, x, y];
+            break;
+            
+          case 'G':  // Goal/Objective
+            id = +data[1];
+            x = +data[2];
+            y = +data[3];
+            objectivePos.push([id, x, y]);
+            break;
+            
+          case 'W':  // Obstacle
+            x = +data[1];
+            y = +data[2];
+            obstaclePos.push([x, y]);
+            break;
+
+          case 'T': // Table
+            x = +data[1];
+            y = +data[2];
+            tablePos.push([x, y]);
+            break;
+            
+          case 'C':  // Carrying relation
+            let robotId = +data[1];
+            let shelfId = +data[2];
+            t = +data[3];
+            // Store the carrying relation: which robot is carrying which shelf at which time
+            carryingRelations[t][robotId] = shelfId;
+            break;
+        }
+      }
+      
+      time = 0;
+      drawcanvas(0);
+    }
+    fr.readAsText(this.files[0]);
+  });
+  
+  // Function to draw cells based on what's in them
+  function drawCell(x, y) {
+    var canvas = document.getElementById("myCanvas");
+    var ctx = canvas.getContext("2d");
+    
+    // Check what's in this cell
+    let hasRobot = false;
+    let robotId = -1;
+    let hasShelf = false;
+    let shelfId = -1;
+    let hasGoal = false;
+    let goalId = -1;
+    let hasObstacle = false;
+    let hasTable = false;
+    
+    // Check for robot
+    if (robotPos[time]) {
+      for (let i = 0; i < robotPos[time].length; i++) {
+        if (robotPos[time][i] && robotPos[time][i][1] === x && robotPos[time][i][2] === y) {
+          hasRobot = true;
+          robotId = robotPos[time][i][0];
+          break;
+        }
+      }
+    }
+    
+    // Check for shelf not being carried
+    if (shelfPos[time]) {
+      for (let i = 0; i < shelfPos[time].length; i++) {
+        if (shelfPos[time][i] && shelfPos[time][i][1] === x && shelfPos[time][i][2] === y) {
+          // Check if this shelf is being carried
+          let isCarried = false;
+          if (carryingRelations[time]) {
+            for (let robotId in carryingRelations[time]) {
+              if (carryingRelations[time][robotId] === shelfPos[time][i][0]) {
+                isCarried = true;
+                break;
+              }
+            }
+          }
+          
+          if (!isCarried) {
+            hasShelf = true;
+            shelfId = shelfPos[time][i][0];
+          }
+          break;
+        }
+      }
+    }
+    
+    // Check for goal
+    for (let i = 0; i < objectivePos.length; i++) {
+      if (objectivePos[i][1] === x && objectivePos[i][2] === y) {
+        hasGoal = true;
+        goalId = objectivePos[i][0];
+        break;
+      }
+    }
+    
+    // Check for obstacle
+    for (let i = 0; i < obstaclePos.length; i++) {
+      if (obstaclePos[i][0] === x && obstaclePos[i][1] === y) {
+        hasObstacle = true;
+        break;
+      }
+    }
+    
+    // Check for table
+    for (let i = 0; i < tablePos.length; i++) {
+      if (tablePos[i][0] === x && tablePos[i][1] === y) {
+        hasTable = true;
+        break;
+      }
+    }
+    
+    // Check if robot is carrying a shelf
+    let robotCarryingShelf = false;
+    if (hasRobot && carryingRelations[time] && carryingRelations[time][robotId] !== undefined) {
+      robotCarryingShelf = true;
+    }
+    
+    // Now draw the appropriate sprite based on what's in the cell
+    const img = new Image();
+    
+    // Decide which image to use based on cell contents
+    if (hasObstacle) {
+      // Obstacle takes precedence
+      img.src = obstaclePath;
+      img.onload = () => {
+        // Center the obstacle in the cell
+        ctx.drawImage(img, 
+          cellsize*x + (cellsize-obstaclesize)/2, 
+          cellsize*y + (cellsize-obstaclesize)/2, 
+          obstaclesize, 
+          obstaclesize);
+      };
+    } else if (hasTable) {
+      // Check if there's a robot at the table
+      if (hasRobot) {
+        img.src = robotTablePath;
+        img.onload = () => {
+          // Center the robot-table in the cell
+          ctx.drawImage(img, 
+            cellsize*x + (cellsize-tablesize)/2, 
+            cellsize*y + (cellsize-tablesize)/2, 
+            tablesize, 
+            tablesize);
+        };
+      } else {
+        img.src = tablePath;
+        img.onload = () => {
+          // Center the table in the cell
+          ctx.drawImage(img, 
+            cellsize*x + (cellsize-tablesize)/2, 
+            cellsize*y + (cellsize-tablesize)/2, 
+            tablesize, 
+            tablesize);
+        };
+      }
+    } else if (hasRobot && robotCarryingShelf && hasGoal) {
+      // Robot carrying shelf at goal
+      img.src = robotCarryingShelfAtGoalPath;
+      img.onload = () => {
+        ctx.drawImage(img, cellsize*x+(cellsize-robotsize)/2, cellsize*y+(cellsize-robotsize)/2, robotsize, robotsize);
+      };
+    } else if (hasRobot && hasShelf && hasGoal) {
+      // Robot with shelf (not carrying) at goal
+      img.src = robotShelfAndGoalPath;
+      img.onload = () => {
+        ctx.drawImage(img, cellsize*x+(cellsize-robotsize)/2, cellsize*y+(cellsize-robotsize)/2, robotsize, robotsize);
+      };
+    } else if (hasRobot && hasGoal) {
+      // Just robot at goal
+      img.src = robotAtGoalPath;
+      img.onload = () => {
+        ctx.drawImage(img, cellsize*x+(cellsize-robotsize)/2, cellsize*y+(cellsize-robotsize)/2, robotsize, robotsize);
+      };
+    } else if (hasRobot && robotCarryingShelf) {
+      // Robot carrying shelf (not at goal)
+      img.src = robotCarryingShelfPath;
+      img.onload = () => {
+        ctx.drawImage(img, cellsize*x+(cellsize-robotsize)/2, cellsize*y+(cellsize-robotsize)/2, robotsize, robotsize);
+      };
+    } else if (hasRobot && hasShelf) {
+      // Robot with shelf (not carrying, not at goal)
+      img.src = robotShelfPath;
+      img.onload = () => {
+        ctx.drawImage(img, cellsize*x+(cellsize-robotsize)/2, cellsize*y+(cellsize-robotsize)/2, robotsize, robotsize);
+      };
+    } else if (hasRobot) {
+      // Just a robot alone
+      img.src = robotPath;
+      img.onload = () => {
+        ctx.drawImage(img, cellsize*x+(cellsize-robotsize)/2, cellsize*y+(cellsize-robotsize)/2, robotsize, robotsize);
+      };
+    } else if (hasShelf && hasGoal) {
+      // Shelf at goal
+      img.src = goalAndShelfPath;
+      img.onload = () => {
+        // Use the appropriate size and center it
+        ctx.drawImage(img, 
+          cellsize*x + (cellsize-shelfsize)/2, 
+          cellsize*y + (cellsize-shelfsize)/2, 
+          shelfsize, 
+          shelfsize);
+      };
+    } else if (hasShelf) {
+      // Just a shelf alone
+      img.src = shelfPath;
+      img.onload = () => {
+        ctx.drawImage(img, cellsize*x+(cellsize-shelfsize)/2, cellsize*y+(cellsize-shelfsize)/2, shelfsize, shelfsize);
+      };
+    } else if (hasGoal) {
+      // Just a goal alone
+      img.src = goalPath;
+      img.onload = () => {
+        ctx.drawImage(img, cellsize*x+(cellsize-shelfsize)/4, cellsize*y+(cellsize-shelfsize)/4, 7/10*cellsize, 7/10*cellsize);
+      };
+    }
+    
+    ctx.stroke();
+  }
+  
+  function drawcanvas(delta) {
+    if (!xrange) return;
+    
+    // Update time if within bounds
+    if (time + delta < robotPos.length && time + delta >= 0) {
+      time = time + delta;
+    }
+    
+    var canvas = document.getElementById("myCanvas");
+    var ctx = canvas.getContext("2d");
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    
+    // Draw grid
+    ctx.beginPath();
+    for (i = 1; i <= xrange; i++) {
+      ctx.moveTo(cellsize*i, 0);
+      ctx.lineTo(cellsize*i, cellsize*(yrange+1));
+    }
+    for (i = 1; i <= yrange; i++) {
+      ctx.moveTo(0, cellsize*i);
+      ctx.lineTo(cellsize*(xrange+1), cellsize*i);
+    }
+    ctx.stroke();
+    
+    // Create a grid to keep track of which cells we need to draw
+    let cellsToCheck = [];
+    for (let x = 0; x <= xrange; x++) {
+      for (let y = 0; y <= yrange; y++) {
+        cellsToCheck.push([x, y]);
+      }
+    }
+    
+    // Draw each cell based on its contents
+    for (let i = 0; i < cellsToCheck.length; i++) {
+      let [x, y] = cellsToCheck[i];
+      drawCell(x, y);
+    }
+    
+    // Update time display
+    document.getElementById("timeText").textContent = time;
+  }
+  
+  function reset() {
+    time = 0;
+    drawcanvas(0);
+  }
+</script>
+
+</body>
+</html>
